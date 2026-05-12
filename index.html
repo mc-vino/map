@@ -3,113 +3,146 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Интерактивная карта ПВЗ</title>
+    <title>Интерактивная карта ПВЗ: Массовое управление</title>
     <script src="https://api-maps.yandex.ru/2.1/?apikey=e9ae29b2-121b-4f83-89ce-dfe6e3df7e50&lang=ru_RU" type="text/javascript"></script>
-    
     <style>
-        body, html { width: 100%; height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; background: #f4f4f7; }
-        #controls { padding: 15px; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,0.1); z-index: 10; display: flex; flex-wrap: wrap; gap: 20px; }
-        .panel { border: 1px solid #ddd; padding: 10px; border-radius: 8px; background: #fafafa; }
-        .panel-title { font-weight: bold; display: block; margin-bottom: 8px; font-size: 13px; color: #555; }
+        body, html { width: 100%; height: 100%; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; background: #f0f2f5; }
+        #controls { padding: 15px; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 10; display: flex; flex-wrap: wrap; gap: 15px; }
+        .panel { border: 1px solid #e0e0e0; padding: 12px; border-radius: 8px; background: #fefefe; }
+        .panel-title { font-weight: bold; display: block; margin-bottom: 8px; color: #333; font-size: 13px; text-transform: uppercase; }
         #map { flex-grow: 1; width: 100%; }
-        input, select, button { padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
-        button { background: #ffdb4d; border: none; cursor: pointer; font-weight: bold; }
+        input, select, button { padding: 6px 10px; margin: 4px 2px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; }
+        button { background: #ffdb4d; border: none; cursor: pointer; font-weight: bold; transition: 0.2s; }
         button:hover { background: #ffd200; }
-        .hint { font-size: 11px; color: #888; margin-top: 5px; }
+        button.secondary { background: #e0e0e0; }
+        button.secondary:hover { background: #d0d0d0; }
+        .stats { font-size: 11px; color: #666; margin-top: 5px; }
+        .selected-info { color: #d9534f; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div id="controls">
     <div class="panel">
-        <span class="panel-title">1. ОБЩИЙ РАДИУС (метры)</span>
-        <input type="number" id="globalRadius" value="3000" step="500" style="width: 80px;">
-        <button onclick="updateAllRadiuses()">Сменить всем</button>
+        <span class="panel-title">1. Фильтры (Отображение)</span>
+        Группа: <select id="filterGroup" onchange="applyFilters()"><option value="all">Все</option></select>
+        Область: <select id="filterRegion" onchange="applyFilters()"><option value="all">Все</option></select>
+        <div class="stats" id="visibleCount">Точек на карте: 0</div>
     </div>
     
     <div class="panel">
-        <span class="panel-title">2. ФИЛЬТРАЦИЯ</span>
-        Группа: <select id="filterGroup" onchange="applyFilters()"><option value="all">Все</option></select>
-        Область: <select id="filterRegion" onchange="applyFilters()"><option value="all">Все</option></select>
+        <span class="panel-title">2. Управление радиусом</span>
+        Радиус: <input type="number" id="newRadiusValue" value="3000" style="width: 70px;"> м.
+        <br>
+        <button onclick="changeRadiusFor('filtered')">Для отфильтрованных</button>
+        <button onclick="changeRadiusFor('selected')">Для выделенных <span id="selectedCount" class="selected-info">(0)</span></button>
+        <button class="secondary" onclick="clearSelection()">Сбросить выделение</button>
     </div>
 
     <div class="panel">
-        <span class="panel-title">3. ДОБАВИТЬ ПВЗ (КЛИКОМ ПО КАРТЕ)</span>
-        <input type="text" id="newName" placeholder="Название ПВЗ">
-        <input type="text" id="newGroup" placeholder="Группа (обяз.)">
-        <input type="text" id="newRegion" placeholder="Область (обяз.)">
-        <div class="hint">Заполните поля и нажмите на любое место на карте</div>
+        <span class="panel-title">3. Информация</span>
+        <div class="hint" style="font-size: 12px; max-width: 300px;">
+            Кликните на метку ПВЗ, чтобы <b>выделить</b> её для массового изменения радиуса. Выделенные точки подсвечиваются красным.
+        </div>
     </div>
 </div>
 
 <div id="map"></div>
 
-<script type="text/javascript">
+<script>
     let myMap;
-    let geoObjects = [];
+    let allPoints = []; // Массив всех объектов {placemark, circle, data}
     
-    // Данные из вашего файла (предварительно обработанные)
+    // Данные из файла
     const rawData = [
-        {"name": "ПВЗ Барановичи Брестская", "address": "Брестская обл., г. Барановичи, ул. Брестская, д. 226/11", "group": "Область", "region": "Брест"},
-        {"name": "ПВЗ Барановичи Ленина", "address": "Брестская обл., г. Барановичи, ул. Ленина, д. 16В", "group": "Регион", "region": "Не указана"},
-        {"name": "ПВЗ Береза", "address": "Брестская обл., Берёзовский р-н, г. Берёза, ул. Красноармейская, д. 64", "group": "Регион", "region": "Не указана"},
-        {"name": "ПВЗ Березино", "address": "Минская обл., Березинский р-н, г. Березино, ул. Карла Маркса, д. 29", "group": "Регион", "region": "Не указана"},
-        {"name": "ПВЗ Бобруйск", "address": "Могилевская обл., г. Бобруйск, ул. Социалистическая, д. 97", "group": "Область", "region": "Могилев"},
-        {"name": "ПВЗ Борисов", "address": "Минская обл., Борисовский р-н, г. Борисов, ул. Строителей, д. 26", "group": "Область", "region": "Минск"},
-        {"name": "ПВЗ Брест", "address": "Брестская обл., г. Брест, б-р Космонавтов, д. 40", "group": "Область", "region": "Брест"},
-        {"name": "ПВЗ Витебск", "address": "Витебская обл., г. Витебск, пр-т Строителей, д. 15", "group": "Область", "region": "Витебск"},
-        {"name": "ПВЗ Гомель", "address": "Гомельская обл., г. Гомель, пр-т Ленина, д. 10", "group": "Область", "region": "Гомель"},
-        {"name": "ПВЗ Гродно", "address": "Гродненская обл., г. Гродно, ул. Карла Маркса, д. 11", "group": "Область", "region": "Гродно"},
-        {"name": "ПВЗ Лида", "address": "Гродненская обл., Лидский р-н, г. Лида, ул. Победы, д. 37", "group": "Регион", "region": "Не указана"},
-        {"name": "ПВЗ Могилев", "address": "Могилевская обл., г. Могилев, ул. Первомайская, д. 42", "group": "Область", "region": "Могилев"},
-        {"name": "ПВЗ Мозырь", "address": "Гомельская обл., Мозырский р-н, г. Мозырь, б-р Дружбы, д. 12", "group": "Регион", "region": "Не указана"},
-        {"name": "ПВЗ Молодечно", "address": "Минская обл., Молодечненский р-н, г. Молодечно, ул. Притыцкого, д. 21", "group": "Регион", "region": "Не указана"},
-        {"name": "ПВЗ Орша", "address": "Витебская обл., Оршанский р-н, г. Орша, ул. Мира, д. 4", "group": "Регион", "region": "Не указана"},
-        {"name": "ПВЗ Пинск", "address": "Брестская обл., г. Пинск, ул. Ленина, д. 2", "group": "Регион", "region": "Не указана"},
-        {"name": "ПВЗ Полоцк", "address": "Витебская обл., Полоцкий р-н, г. Полоцк, ул. Гоголя, д. 13", "group": "Регион", "region": "Не указана"},
-        {"name": "ПВЗ Солигорск", "address": "Минская обл., Солигорский р-н, г. Солигорск, ул. Ленина, д. 42", "group": "Регион", "region": "Не указана"}
-        // Здесь сокращенный список для примера, в реальности подгружаются все строки
+        {"name":"ПВЗ Барановичи Брестская","addr":"Брестская обл., г. Барановичи, ул. Брестская, д. 226/11","city":"Барановичи","group":"Область","region":"Брест"},
+        {"name":"ПВЗ Барановичи Ленина","addr":"Брестская обл., г. Барановичи, ул. Ленина, д. 16В","city":"Барановичи","group":"Регион","region":""},
+        {"name":"ПВЗ Барановичи Фабричная","addr":"Брестская обл., г. Барановичи, ул. Брестская, д. 226/11","city":"Барановичи","group":"Регион","region":""},
+        {"name":"ПВЗ Белыничи","addr":"Могилевская обл., г. Белыничи, ул. Калинина, д. 40","city":"Белыничи","group":"Регион","region":""},
+        {"name":"ПВЗ Береза","addr":"Брестская обл., г. Берёза, ул. Красноармейская, д. 64","city":"Берёза","group":"Регион","region":""},
+        {"name":"ПВЗ Березино","addr":"Минская обл., г. Березино, ул. Карла Маркса, д. 29","city":"Березино","group":"Регион","region":""},
+        {"name":"ПВЗ Бобруйск","addr":"Могилевская обл., г. Бобруйск, ул. Социалистическая, д. 97","city":"Бобруйск","group":"Область","region":"Могилев"},
+        {"name":"ПВЗ Борисов","addr":"Минская обл., г. Борисов, ул. Строителей, д. 26","city":"Борисов","group":"Область","region":"Минск"},
+        {"name":"ПВЗ Брест","addr":"Брестская обл., г. Брест, б-р Космонавтов, д. 40","city":"Брест","group":"Область","region":"Брест"},
+        {"name":"ПВЗ Витебск","addr":"Витебская обл., г. Витебск, пр-т Строителей, д. 15","city":"Витебск","group":"Область","region":"Витебск"},
+        {"name":"ПВЗ Волковыск","addr":"Гродненская обл., г. Волковыск, ул. Советская, д. 16","city":"Волковыск","group":"Регион","region":""},
+        {"name":"ПВЗ Воложин","addr":"Минская обл., г. Воложин, ул. Советская, д. 62","city":"Воложин","group":"Регион","region":""},
+        {"name":"ПВЗ Ганцевичи","addr":"Брестская обл., г. Ганцевичи, ул. Октябрьская, д. 10","city":"Ганцевичи","group":"Регион","region":""},
+        {"name":"ПВЗ Глубокое","addr":"Витебская обл., г. Глубокое, ул. Ленина, д. 7","city":"Глубокое","group":"Регион","region":""},
+        {"name":"ПВЗ Гомель","addr":"Гомельская обл., г. Гомель, пр-т Ленина, д. 10","city":"Гомель","group":"Область","region":"Гомель"},
+        {"name":"ПВЗ Горки","addr":"Могилевская обл., г. Горки, ул. Якубовского, д. 21","city":"Горки","group":"Регион","region":""},
+        {"name":"ПВЗ Гродно","addr":"Гродненская обл., г. Гродно, ул. Карла Маркса, д. 11","city":"Гродно","group":"Область","region":"Гродно"},
+        {"name":"ПВЗ Дзержинск","addr":"Минская обл., г. Дзержинск, ул. Советская, д. 5","city":"Дзержинск","group":"Регион","region":""},
+        {"name":"ПВЗ Добруш","addr":"Гомельская обл., г. Добруш, ул. К. Маркса, д. 1","city":"Добруш","group":"Регион","region":""},
+        {"name":"ПВЗ Жлобин","addr":"Гомельская обл., г. Жлобин, ул. Первомайская, д. 52","city":"Жлобин","group":"Регион","region":""},
+        {"name":"ПВЗ Жодино","addr":"Минская обл., г. Жодино, ул. 50 лет Октября, д. 21","city":"Жодино","group":"Регион","region":""},
+        {"name":"ПВЗ Иваново","addr":"Брестская обл., г. Иваново, ул. Ленина, д. 7","city":"Иваново","group":"Регион","region":""},
+        {"name":"ПВЗ Ивацевичи","addr":"Брестская обл., г. Ивацевичи, ул. Ленина, д. 45","city":"Ивацевичи","group":"Регион","region":""},
+        {"name":"ПВЗ Калинковичи","addr":"Гомельская обл., г. Калинковичи, ул. Советская, д. 122","city":"Калинковичи","group":"Регион","region":""},
+        {"name":"ПВЗ Клецк","addr":"Минская обл., г. Клецк, ул. Советская, д. 22","city":"Клецк","group":"Регион","region":""},
+        {"name":"ПВЗ Кобрин","addr":"Брестская обл., г. Кобрин, ул. Ленина, д. 17","city":"Кобрин","group":"Регион","region":""},
+        {"name":"ПВЗ Костюковичи","addr":"Могилевская обл., г. Костюковичи, ул. Ленинская, д. 70","city":"Костюковичи","group":"Регион","region":""},
+        {"name":"ПВЗ Кричев","addr":"Могилевская обл., г. Кричев, ул. Ленинская, д. 38","city":"Кричев","group":"Регион","region":""},
+        {"name":"ПВЗ Лепель","addr":"Витебская обл., г. Лепель, ул. Советская, д. 36","city":"Лепель","group":"Регион","region":""},
+        {"name":"ПВЗ Лида","addr":"Гродненская обл., г. Лида, ул. Победы, д. 37","city":"Лида","group":"Регион","region":""},
+        {"name":"ПВЗ Логойск","addr":"Минская обл., г. Логойск, ул. Советская, д. 15","city":"Логойск","group":"Регион","region":""},
+        {"name":"ПВЗ Лунинец","addr":"Брестская обл., г. Лунинец, ул. Советская, д. 11","city":"Лунинец","group":"Регион","region":""},
+        {"name":"ПВЗ Любань","addr":"Минская обл., г. Любань, ул. Первомайская, д. 35","city":"Любань","group":"Регион","region":""},
+        {"name":"ПВЗ Марина Горка","addr":"Минская обл., г. Марьина Горка, ул. Ленинская, д. 45","city":"Марьина Горка","group":"Регион","region":""},
+        {"name":"ПВЗ Микашевичи","addr":"Брестская обл., г. Микашевичи, ул. Первомайская, д. 12","city":"Микашевичи","group":"Регион","region":""},
+        {"name":"ПВЗ Могилев","addr":"Могилевская обл., г. Могилев, ул. Первомайская, д. 42","city":"Могилев","group":"Область","region":"Могилев"},
+        {"name":"ПВЗ Мозырь","addr":"Гомельская обл., г. Мозырь, б-р Дружбы, д. 12","city":"Мозырь","group":"Регион","region":""},
+        {"name":"ПВЗ Молодечно","addr":"Минская обл., г. Молодечно, ул. Притыцкого, д. 21","city":"Молодечно","group":"Регион","region":""},
+        {"name":"ПВЗ Мосты","addr":"Гродненская обл., г. Мосты, ул. Советская, д. 33","city":"Мосты","group":"Регион","region":""},
+        {"name":"ПВЗ Мстиславль","addr":"Могилевская обл., г. Мстиславль, ул. Советская, д. 14","city":"Мстиславль","group":"Регион","region":""},
+        {"name":"ПВЗ Наровля","addr":"Гомельская обл., г. Наровля, ул. Корзуна, д. 33","city":"Наровля","group":"Регион","region":""},
+        {"name":"ПВЗ Несвиж","addr":"Минская обл., г. Несвиж, ул. Советская, д. 21","city":"Несвиж","group":"Регион","region":""},
+        {"name":"ПВЗ Новогрудок","addr":"Гродненская обл., г. Новогрудок, ул. Советская, д. 23","city":"Новогрудок","group":"Регион","region":""},
+        {"name":"ПВЗ Новолукомль","addr":"Витебская обл., г. Новолукомль, ул. Набережная, д. 21","city":"Новолукомль","group":"Регион","region":""},
+        {"name":"ПВЗ Новополоцк","addr":"Витебская обл., г. Новополоцк, ул. Молодежная, д. 102","city":"Новополоцк","group":"Регион","region":""},
+        {"name":"ПВЗ Орша","addr":"Витебская обл., г. Орша, ул. Мира, д. 4","city":"Орша","group":"Регион","region":""},
+        {"name":"ПВЗ Осиповичи","addr":"Могилевская обл., г. Осиповичи, ул. Сумченко, д. 43","city":"Осиповичи","group":"Регион","region":""},
+        {"name":"ПВЗ Островец","addr":"Гродненская обл., г. Островец, ул. Ленинская, д. 5","city":"Островец","group":"Регион","region":""},
+        {"name":"ПВЗ Ошмяны","addr":"Гродненская обл., г. Ошмяны, ул. Советская, д. 97","city":"Ошмяны","group":"Регион","region":""},
+        {"name":"ПВЗ Пинск","addr":"Брестская обл., г. Пинск, ул. Ленина, д. 2","city":"Пинск","group":"Регион","region":""},
+        {"name":"ПВЗ Полоцк","addr":"Витебская обл., г. Полоцк, ул. Гоголя, д. 13","city":"Полоцк","group":"Регион","region":""},
+        {"name":"ПВЗ Поставы","addr":"Витебская обл., г. Поставы, ул. Советская, д. 18","city":"Поставы","group":"Регион","region":""},
+        {"name":"ПВЗ Пружаны","addr":"Брестская обл., г. Пружаны, ул. Советская, д. 15","city":"Пружаны","group":"Регион","region":""},
+        {"name":"ПВЗ Речица","addr":"Гомельская обл., г. Речица, ул. Советская, д. 56","city":"Речица","group":"Регион","region":""},
+        {"name":"ПВЗ Рогачев","addr":"Гомельская обл., г. Рогачев, ул. Ленина, д. 52","city":"Рогачев","group":"Регион","region":""},
+        {"name":"ПВЗ Светлогорск","addr":"Гомельская обл., г. Светлогорск, ул. 50 лет Октября, д. 19","city":"Светлогорск","group":"Регион","region":""},
+        {"name":"ПВЗ Слоним","addr":"Гродненская обл., г. Слоним, ул. Первомайская, д. 12","city":"Слоним","group":"Регион","region":""},
+        {"name":"ПВЗ Слуцк","addr":"Минская обл., г. Слуцк, ул. Ленина, д. 187","city":"Слуцк","group":"Регион","region":""},
+        {"name":"ПВЗ Смолевичи","addr":"Минская обл., г. Смолевичи, ул. Советская, д. 132","city":"Смолевичи","group":"Регион","region":""},
+        {"name":"ПВЗ Сморгонь","addr":"Гродненская обл., г. Сморгонь, ул. Советская, д. 29","city":"Сморгонь","group":"Регион","region":""},
+        {"name":"ПВЗ Солигорск","addr":"Минская обл., г. Солигорск, ул. Ленина, д. 42","city":"Солигорск","group":"Регион","region":""},
+        {"name":"ПВЗ Старые Дороги","addr":"Минская обл., г. Старые Дороги, ул. Комсомольская, д. 3","city":"Старые Дороги","group":"Регион","region":""},
+        {"name":"ПВЗ Столбцы","addr":"Минская обл., г. Столбцы, ул. Ленинская, д. 87/5","city":"СТОЛБЦЫ","group":"Регион","region":""},
+        {"name":"ПВЗ Таборы","addr":"Минская обл., д Таборы, д. 35/10","city":"Таборы","group":"Минск","region":"Минск"},
+        {"name":"ПВЗ Узда","addr":"Минская обл., г. Узда, ул. Пашкевича, д. 1","city":"Узда","group":"Регион","region":""},
+        {"name":"ПВЗ Хойники","addr":"Гомельская обл., г. Хойники, ул. Карла Маркса, д. 27","city":"Хойники","group":"Регион","region":""}
     ];
 
     ymaps.ready(init);
 
     function init() {
         myMap = new ymaps.Map("map", {
-            center: [53.9, 27.56], // Центр (Беларусь)
+            center: [53.9, 27.56], 
             zoom: 7,
             controls: ['zoomControl', 'searchControl', 'typeSelector', 'fullscreenControl']
         });
 
-        // Настройка фильтров
         setupFilters();
 
-        // Отображение точек из списка
+        // Загрузка ПВЗ
         rawData.forEach(item => {
-            geocodeAndAdd(item.address, item.name, item.group, item.region, 3000);
-        });
-
-        // Добавление точки кликом
-        myMap.events.add('click', function (e) {
-            const coords = e.get('coords');
-            const name = document.getElementById('newName').value || "Новый ПВЗ";
-            const group = document.getElementById('newGroup').value;
-            const region = document.getElementById('newRegion').value;
-
-            if(!group || !region) {
-                alert("Пожалуйста, заполните поля 'Группа' и 'Область' перед кликом по карте.");
-                return;
-            }
-
-            ymaps.geocode(coords).then(res => {
-                const address = res.geoObjects.get(0).getAddressLine();
-                addPointToMap(coords, name, address, group, region, 3000);
-            });
+            geocodeAndAdd(item);
         });
     }
 
     function setupFilters() {
-        const groups = [...new Set(rawData.map(i => i.group))].filter(Boolean);
-        const regions = [...new Set(rawData.map(i => i.region))].filter(Boolean);
+        const groups = [...new Set(rawData.map(i => i.group))].filter(Boolean).sort();
+        const regions = [...new Set(rawData.map(i => i.region))].filter(Boolean).sort();
         
         const gSel = document.getElementById('filterGroup');
         const rSel = document.getElementById('filterRegion');
@@ -118,62 +151,120 @@
         regions.forEach(r => rSel.innerHTML += `<option value="${r}">${r}</option>`);
     }
 
-    function geocodeAndAdd(address, name, group, region, radius) {
-        ymaps.geocode(address).then(res => {
+    function geocodeAndAdd(data) {
+        ymaps.geocode(data.addr).then(res => {
             const obj = res.geoObjects.get(0);
             if (obj) {
                 const coords = obj.geometry.getCoordinates();
-                addPointToMap(coords, name, address, group, region, radius);
+                createPoint(coords, data);
             }
         });
     }
 
-    function addPointToMap(coords, name, address, group, region, radius) {
+    function createPoint(coords, data) {
         // Метка
         const placemark = new ymaps.Placemark(coords, {
-            balloonContentHeader: `<b>${name}</b>`,
-            balloonContentBody: `Адрес: ${address}<br>Группа: ${group}<br>Область: ${region}`,
-            hintContent: name
-        }, { preset: 'islands#violetDotIcon' });
-
-        // Радиус (Круг)
-        const circle = new ymaps.Circle([coords, radius], {}, {
-            fillColor: "#9370DB33", strokeColor: "#9370DB", strokeOpacity: 0.8, strokeWidth: 2
+            balloonContent: `<b>${data.name}</b><br>${data.addr}<br>Группа: ${data.group}`,
+            hintContent: "Кликните, чтобы выбрать точку"
+        }, { 
+            preset: 'islands#violetDotIcon' 
         });
 
-        const entry = { placemark, circle, group, region };
-        geoObjects.push(entry);
+        // Радиус
+        const circle = new ymaps.Circle([coords, 3000], {}, {
+            fillColor: "#9370DB33", strokeColor: "#9370DB", strokeOpacity: 0.6, strokeWidth: 2
+        });
+
+        // Свойства объекта
+        const entry = {
+            placemark: placemark,
+            circle: circle,
+            data: data,
+            selected: false,
+            visible: true
+        };
+
+        // Обработка клика для выделения
+        placemark.events.add('click', function (e) {
+            entry.selected = !entry.selected;
+            updatePointStyle(entry);
+            updateSelectionCount();
+        });
+
+        allPoints.push(entry);
         myMap.geoObjects.add(placemark);
         myMap.geoObjects.add(circle);
-
-        // Инфо о населении (через геокодер города)
-        ymaps.geocode(coords, {kind: 'locality'}).then(res => {
-            const city = res.geoObjects.get(0) ? res.geoObjects.get(0).getLocalities()[0] : "н/д";
-            if(city) {
-                // В API нет цифр населения, добавляем инфо о городе
-                placemark.properties.set('balloonContentFooter', `Населенный пункт: ${city}`);
-            }
-        });
+        
+        updateVisibleCount();
     }
 
-    function updateAllRadiuses() {
-        const r = Number(document.getElementById('globalRadius').value);
-        geoObjects.forEach(obj => obj.circle.geometry.setRadius(r));
+    function updatePointStyle(entry) {
+        if (entry.selected) {
+            entry.placemark.options.set('preset', 'islands#redDotIcon');
+            entry.circle.options.set('fillColor', '#ff000033');
+            entry.circle.options.set('strokeColor', '#ff0000');
+        } else {
+            entry.placemark.options.set('preset', 'islands#violetDotIcon');
+            entry.circle.options.set('fillColor', '#9370DB33');
+            entry.circle.options.set('strokeColor', '#9370DB');
+        }
     }
 
     function applyFilters() {
         const g = document.getElementById('filterGroup').value;
         const r = document.getElementById('filterRegion').value;
+        let visibleCount = 0;
 
-        geoObjects.forEach(obj => {
-            const gShow = (g === 'all' || obj.group === g);
-            const rShow = (r === 'all' || obj.region === r);
-            const visible = gShow && rShow;
-            obj.placemark.options.set('visible', visible);
-            obj.circle.options.set('visible', visible);
+        allPoints.forEach(entry => {
+            const gShow = (g === 'all' || entry.data.group === g);
+            const rShow = (r === 'all' || entry.data.region === r);
+            const isVisible = gShow && rShow;
+            
+            entry.visible = isVisible;
+            entry.placemark.options.set('visible', isVisible);
+            entry.circle.options.set('visible', isVisible);
+            
+            if (isVisible) visibleCount++;
+        });
+        
+        document.getElementById('visibleCount').innerText = `Точек на карте: ${visibleCount}`;
+    }
+
+    function changeRadiusFor(mode) {
+        const newR = Number(document.getElementById('newRadiusValue').value);
+        if (isNaN(newR) || newR < 0) return alert("Введите корректный радиус");
+
+        let targetPoints = [];
+        if (mode === 'filtered') {
+            targetPoints = allPoints.filter(p => p.visible);
+        } else if (mode === 'selected') {
+            targetPoints = allPoints.filter(p => p.selected);
+        }
+
+        if (targetPoints.length === 0) return alert("Нет подходящих точек");
+
+        targetPoints.forEach(p => {
+            p.circle.geometry.setRadius(newR);
         });
     }
-</script>
 
+    function clearSelection() {
+        allPoints.forEach(p => {
+            p.selected = false;
+            updatePointStyle(p);
+        });
+        updateSelectionCount();
+    }
+
+    function updateSelectionCount() {
+        const count = allPoints.filter(p => p.selected).length;
+        document.getElementById('selectedCount').innerText = `(${count})`;
+    }
+
+    function updateVisibleCount() {
+        const count = allPoints.filter(p => p.visible).length;
+        document.getElementById('visibleCount').innerText = `Точек на карте: ${count}`;
+    }
+</script>
 </body>
 </html>
