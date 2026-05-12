@@ -948,6 +948,97 @@
                     geoAddress: "г. Минск, ул. Тростенецкая, д. 17", city: "Минск", group: "Минск", areaGroup: "" },
             ];
 
+            // ==================== POPULATION DATA ====================
+            const populationData = {
+                'Минск': 1995000,
+                'Гомель': 510000,
+                'Могилев': 360000,
+                'Витебск': 366000,
+                'Гродно': 361000,
+                'Брест': 342000,
+                'Бобруйск': 211000,
+                'Барановичи': 175000,
+                'Борисов': 135000,
+                'Пинск': 126000,
+                'Орша': 105000,
+                'Мозырь': 105000,
+                'Солигорск': 101000,
+                'Новополоцк': 98000,
+                'Лида': 98000,
+                'Молодечно': 92000,
+                'Полоцк': 83000,
+                'Жлобин': 76000,
+                'Светлогорск': 67000,
+                'Речица': 65000,
+                'Слуцк': 62000,
+                'Кобрин': 53000,
+                'Волковыск': 44000,
+                'Сморгонь': 36000,
+                'Новогрудок': 29000,
+                'Калинковичи': 37000,
+                'Рогачёв': 33000,
+                'Горки': 33000,
+                'Осиповичи': 31000,
+                'Береза': 29000,
+                'Ивацевичи': 23000,
+                'Дзержинск': 26000,
+                'Столбцы': 16000,
+                'Несвиж': 15000,
+                'Лунинец': 22000,
+                'Пружаны': 18000,
+                'Жодино': 63000,
+                'Заславль': 14000,
+                'Логойск': 12000,
+                'Смолевичи': 16000,
+                'Марьина Горка': 21000,
+                'Добруш': 18000,
+                'Поставы': 19000,
+                'Глубокое': 18000,
+                'Климовичи': 16000,
+                'Кричев': 25000,
+                'Червень': 10000,
+                'Березино': 12000,
+                'Скидель': 10000,
+                'Щучин': 13000,
+                'Островец': 9000,
+                'Ошмяны': 14000,
+                'Слоним': 48000,
+                'Новолукомль': 13000,
+                'Хойники': 12000,
+                'Лельчицы': 9000,
+                'Ельск': 9000,
+                'Клецк': 10000,
+                'Узда': 9000,
+                'Копыль': 9000,
+                'Микашевичи': 12000,
+                'Иваново': 14000,
+                'Дрогичин': 13000,
+                'Ганцевичи': 13000,
+                'Верхнедвинск': 7000,
+                'Браслав': 9000,
+                'Мядель': 7000,
+                'Вилейка': 26000,
+                'Воложин': 10000,
+                'Быхов': 14000,
+                'Костюковичи': 15000,
+                'Крупки': 8000,
+                'Белыничи': 9000,
+                'Чериков': 8000,
+                'Чаусы': 10000,
+                'Славгород': 8000,
+                'Городок': 12000,
+                'Шумилино': 7000,
+                'Толочин': 9000,
+                'Корма': 5000,
+                'Наровля': 7000,
+                'Петриков': 10000,
+                'Житковичи': 16000,
+                'Буда-Кошелево': 8000,
+                'Чечерск': 7000,
+                'Лоев': 6000,
+                'Брагин': 4000,
+            };
+
             // ==================== STATE ====================
             const STORAGE_KEY = 'pvz_geo_data_v3';
             const STORAGE_COORDS_KEY = 'pvz_geo_coords_v3';
@@ -1169,12 +1260,27 @@
                     updateStats();
                 });
 
+                // Скрываем/показываем круги при изменении масштаба для производительности
+                map.events.add('zoomchange', () => {
+                    const zoom = map.getZoom();
+                    const showCircles = zoom >= 9;
+                    pvzMarkers.forEach(pm => {
+                        if (pm.circle && pm.circle.getMap()) {
+                            pm.circle.options.set('visible', showCircles);
+                        }
+                    });
+                    potentialMarkers.forEach(pm => {
+                        if (pm.circle && pm.circle.getMap()) {
+                            pm.circle.options.set('visible', showCircles);
+                        }
+                    });
+                });
+
                 map.events.add('click', (e) => {
                     const coords = e.get('coords');
-                    // Only open modal if click is not on a marker
                     const target = e.get('target');
                     if (target && target !== map) {
-                        return; // clicked on a map object
+                        return;
                     }
                     openAddModal(coords);
                 });
@@ -1185,11 +1291,17 @@
 
             // ==================== MARKER BUILDING ====================
             function createPlacemark(data, color, circleColor, circleOpacity, circleDash = null) {
+                const cityName = data.city || '';
+                const population = populationData[cityName] ?
+                    populationData[cityName].toLocaleString() + ' чел.' :
+                    'нет данных';
+
                 const placemark = new ymaps.Placemark(data.coords, {
                     balloonContentHeader: `<strong>${data.name}</strong>`,
                     balloonContentBody: `
                         <b>Адрес:</b> ${data.address || data.bestAddress || '—'}<br>
-                        <b>Город:</b> ${data.city || '—'}<br>
+                        <b>Город:</b> ${cityName || '—'}<br>
+                        <b>Население города:</b> ${population}<br>
                         <b>Группа:</b> ${data.group || '—'} | <b>Область:</b> ${data.areaGroup || '—'}<br>
                         ${data._nearestInfo || ''}
                     `,
@@ -1211,6 +1323,7 @@
                         strokeWidth: circleDash ? 2 : 1.5,
                         strokeStyle: circleDash ? 'dash' : 'solid',
                         interactivityModel: 'default#transparent',
+                        visible: map && map.getZoom() >= 9, // начальная видимость
                     },
                 };
                 if (circleDash) {
@@ -1257,7 +1370,6 @@
             }
 
             function rebuildAllMarkers() {
-                // Clear existing
                 clearAllMarkers();
 
                 const allData = [...allPvzData, ...addedPvzData].filter(d => d.coords);
@@ -1317,7 +1429,6 @@
                 const filtered = applyFilters(allData);
                 const filteredIds = new Set(filtered.map(d => d.id));
 
-                // Remove markers not in filter
                 const toRemove = [];
                 for (let i = pvzMarkers.length - 1; i >= 0; i--) {
                     if (!filteredIds.has(pvzMarkers[i].data.id)) {
@@ -1331,15 +1442,8 @@
                     pvzMarkers.splice(i, 1);
                     selectedMarkerIndices.delete(i);
                 }
-                // Rebuild selectedMarkerIndices
-                const newSelected = new Set();
-                const remainingIds = new Set(pvzMarkers.map(m => m.data.id));
-                for (const idx of selectedMarkerIndices) {
-                    // These indices may be stale; we need to re-find
-                }
                 selectedMarkerIndices.clear();
 
-                // Add markers that are in filter but not on map
                 const existingIds = new Set(pvzMarkers.map(m => m.data.id));
                 for (const data of filtered) {
                     if (!existingIds.has(data.id)) {
@@ -1363,7 +1467,6 @@
                     pm.data.radius = newRadius;
                     pm.circle.geometry.setRadius(newRadius);
                 }
-                // Also update stored data
                 for (const d of allPvzData) d.radius = newRadius;
                 for (const d of addedPvzData) d.radius = newRadius;
                 saveAllData();
@@ -1419,7 +1522,6 @@
                     return;
                 }
 
-                // Create grid
                 const ne = bounds.getNorthEast();
                 const sw = bounds.getSouthWest();
                 const latStep = (ne[0] - sw[0]) / 25;
@@ -1429,7 +1531,6 @@
                     ymaps.coordSystem.geo.getDistance([sw[0], sw[1]], [sw[0], sw[1] + lonStep])
                 );
 
-                // If grid spacing is too large relative to density radius, adjust
                 const actualSpacing = Math.min(gridSpacingMeters, dr * 0.8);
 
                 const candidates = [];
@@ -1447,7 +1548,6 @@
                     }
                 }
 
-                // Filter candidates not covered by any visible ПВЗ's radius
                 const uncovered = candidates.filter(c => {
                     for (const d of visibleData) {
                         const dist = ymaps.coordSystem.geo.getDistance(c, d.coords);
@@ -1461,7 +1561,6 @@
                     return;
                 }
 
-                // Score candidates by proximity to city centers (population proxy)
                 const cityCenters = {};
                 for (const d of allData) {
                     if (d.city && d.coords) {
@@ -1486,7 +1585,6 @@
                 });
                 scored.sort((a, b) => a.score - b.score);
 
-                // Take top N candidates, but also ensure minimum spacing between them
                 const minSpacing = dr * 0.7;
                 const selected = [];
                 for (const s of scored) {
@@ -1501,7 +1599,6 @@
                     if (selected.length >= 50) break;
                 }
 
-                // Create potential markers
                 for (let i = 0; i < selected.length; i++) {
                     const s = selected[i];
                     const potData = {
@@ -1539,7 +1636,6 @@
                     try { return map.getBounds().contains(d.coords); } catch (e) { return true; }
                 });
 
-                // Group by city
                 const byCity = {};
                 for (const d of visible) {
                     const city = (d.city || 'Неизвестно').toLowerCase();
@@ -1573,7 +1669,6 @@
                             map.geoObjects.add(line);
                             neighborLines.push(line);
 
-                            // Store nearest info on both points
                             const distKm = (nearestDist / 1000).toFixed(2);
                             const distM = Math.round(nearestDist);
                             points[i]._nearestInfo =
@@ -1764,24 +1859,19 @@
 
             // ==================== INIT ====================
             async function initialize() {
-                // Normalize data
                 allPvzData = normalizeData(rawData);
 
-                // Try loading from localStorage
                 const hasStored = loadAllData();
                 if (!hasStored) {
                     saveAllData();
                 }
 
-                // Sync radius inputs
                 $radiusAll.value = defaultRadius;
                 $radiusDensity.value = densityRadius;
                 $radiusSelected.value = defaultRadius;
 
-                // Geocode missing coordinates
                 await geocodeAllData(true);
 
-                // Wait for Yandex Maps
                 ymaps.ready(() => {
                     initMap();
                     updateStats();
@@ -1790,7 +1880,6 @@
 
             initialize().catch(err => {
                 console.error('Initialization error:', err);
-                // Still try to init map even if geocoding partially failed
                 ymaps.ready(() => {
                     initMap();
                     updateStats();
